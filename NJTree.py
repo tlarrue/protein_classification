@@ -1,5 +1,6 @@
 '''
 Represents a neighbor-joining classification tree. 
+Equation Ref: https://en.wikipedia.org/wiki/Neighbor_joining
 
 Attributes:
 - tree [nested dictionaries?]
@@ -13,17 +14,15 @@ Methods:
 def _calculate_Qmatrix(distance_matrix):
 	# TODO: write Q matrix function
 	# Calculates Q matrix from the distance matrix
-	# https://en.wikipedia.org/wiki/Neighbor_joining  -- EQ 1
+	# wiki EQ 1
 	return Q
 
 class NJtree:
 
 	def __init__(self):
-		#TODO: decide on data structures
-		self.distance_matrix = ? #Pandas DS?
-		self.Q = ? #Pandas DS
-		self.tree = {} #nested dictionaries?
-
+		#TODO: decide on data structure
+		self.distance_matrix = [] # Pandas DS?
+		self.tree = {} #nested dictionaries? - must include lengths
 
 	def cluster_leaves(self, i, j):
 		# TODO: write cluster_leaves funtion
@@ -33,7 +32,8 @@ class NJtree:
 	def update_distances(self, i, j):
 		# TODO: write update_distances function
 		# updates the distance_matrix by replacing i & j with a new node & 
-		# 	recalculating distances b/t new node + other OTUs & vise-versa
+		# 	recalculating distances b/t new node + other OTUs & vise-versa.
+		#	Also add relevant distances to the tree.
 		# 		wiki EQ 2 = Distance from each OTU to new node
 		# 		wiki EQ 3 = Distance from OTUs to new node 
 
@@ -42,11 +42,10 @@ class NJtree:
 
 		N = distances.shape[0] #number of sequences
 
-		# Equation reference: https://en.wikipedia.org/wiki/Neighbor_joining
 		for i in range(N-3):
 
 			# 1] Calculate Q matrix from distances
-			Q = _calculate_Qmatrix(distance_matrix)
+			Q = _calculate_Qmatrix(self.distance_matrix)
  
 			# 2] Search Q to find a pair (i,j) where Q(i,j) has the lowest value
 			(i,j) = Q.idxmin() 
