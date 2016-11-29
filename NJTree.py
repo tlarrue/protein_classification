@@ -31,6 +31,7 @@ def _calculate_q_matrix(dist_matrix):
             val -= np.nansum(dist_matrix.iloc[i, :])
             val -= np.nansum(dist_matrix.iloc[:, j])
             q_matrix.iat[i, j] = val
+            q_matrix.iat[j, i] = val
 
     return q_matrix
 
@@ -54,20 +55,19 @@ class NJTree:
         # Calculate distances from leaves to be clustered to the new node.
         # Dist from i to the new node i-j is...
         # .5*dist(i,j) + 1/(2n-4) * (sum(dist(i, )-sum(dist(j, ))
-        dist_to_i = (.5 * self.dist_matrix.iat[i, j] +
+        dist_to_i = (.5 * self.dist_matrix.at[i, j] +
                     ((1 / (2 * n - 4)) *
-                        (np.nansum(self.dist_matrix.iloc[i, :]) -
-                        np.nansum(self.dist_matrix.iloc[:, j]))))
+                        (np.nansum(self.dist_matrix.loc[i, :]) -
+                        np.nansum(self.dist_matrix.loc[:, j]))))
         # Dist from j to new node is dist(i,j) - dist(i, i-j)
-        dist_to_j = self.dist_matrix.iat[i, j] - dist_to_i
+        dist_to_j = self.dist_matrix.at[i, j] - dist_to_i
         
         # Add new node to tree.
-        i_name = str(self.dist_matrix.axes[0][i])
-        j_name = str(self.dist_matrix.axes[0][j])
-        node_name = j_name + "-" + i_name
-        self.tree[node_name] = {i_name : dist_to_i, j_name : dist_to_j}
+        node_name = "(" + j + "-" + i + ")"
+        self.tree[node_name] = {i : dist_to_i, j : dist_to_j}
         print "Tree:"
         print self.tree
+        print
 
 
     def update_distances(self, i, j):
@@ -77,7 +77,30 @@ class NJTree:
         #     Also add relevant distances to the tree.
         #         wiki EQ 2 = Distance from each OTU to new node
         #         wiki EQ 3 = Distance from OTUs to new node
-        return
+        
+        node_label = pd.Index(["("  + j + "-" + i + ")"])
+        new_labels = self.dist_matrix.axes[0].drop([i, j]).append(node_label)
+        new_dist_matrix = pd.DataFrame(np.nan, index=new_labels, columns=new_labels)
+        
+        # Fill in distance matrix
+        # First copy over values that stay the same
+        for row in new_dist_matrix.axes[0].drop(node_label):
+            for col in new_dist_matrix.axes[1].drop([node_label[0], row]):
+                new_dist_matrix.at[row, col] = self.dist_matrix.at[row, col]
+                new_dist_matrix.at[col, row] = self.dist_matrix.at[row, col]
+                
+        # Distance from other OTU, k, to new node, i-j:
+        # d(i-j, k) = .5 * (dist(i, k) + dist(j, k) - dist(i, j))
+        for k in new_dist_matrix.axes[1].drop(node_label):
+            dist = .5 * (self.dist_matrix.at[k, i]
+                         + self.dist_matrix.at[k, j]
+                         - self.dist_matrix.at[i, j])
+            new_dist_matrix.at[node_label, k] = dist
+            new_dist_matrix.at[k, node_label] = dist
+        print "New distance matrix:"
+        print new_dist_matrix
+        print
+        self.dist_matrix = new_dist_matrix
 
 
     def build(self, dist_matrix):
@@ -89,24 +112,30 @@ class NJTree:
 
             # 1] Calculate q_matrix matrix from distances
             q_matrix = _calculate_q_matrix(self.dist_matrix)
+            print "Q matrix:"
+            print q_matrix
+            print
 
             # 2] Find a pair (i,j) where q_matrix(i,j) has the lowest value
-            max = decimal.Decimal('-Infinity')
-            (max_col, max_row) = (None, None)
+            min = decimal.Decimal('Infinity')
+            (min_col, min_row) = (None, None)
+            
             # TODO: Find a cleaner way to exclude last col -- need to exclude it
             # b/c it is all NaN
             nan_col = q_matrix.axes[1][q_matrix.axes[1].size - 1]
             for col in q_matrix.axes[1].drop(nan_col):
-                if q_matrix[col][q_matrix.idxmax()[col]] > max:
-                    max = q_matrix[col][q_matrix.idxmax()[col]]
-                    (max_col, max_row) = (col, q_matrix.idxmax()[col])
+                if q_matrix[col][q_matrix.idxmin()[col]] < min:
+                    min = q_matrix[col][q_matrix.idxmin()[col]]
+                    (min_col, min_row) = (col, q_matrix.idxmin()[col])
             # (i,j) = q_matrix.idxmin()
 
             # 3] Cluster (j, i) pair by adding new node to tree
-            self.cluster_leaves(int(max_row), int(max_col))
+            self.cluster_leaves(min_row, min_col)
 
             # 4] Recalculate distances (distance matrix)
-            self.update_distances(max_row, max_col)
+            self.update_distances(min_row, min_col)
+            
+            # TODO: Add remaining branch lengths/nodes from dist_matrix
 
 
     def classify_treeNN(self, protein_sequence):
@@ -119,18 +148,17 @@ class NJTree:
 
 if __name__ == '__main__':
     # Create a distance matrix for testing.
-    dist_matrix = pd.DataFrame(np.nan, index=range(1, 7), columns=range(1, 7))
+    labels = ["1", "2", "3", "4", "5", "6"]
+    dist_matrix = pd.DataFrame(np.nan, index=labels, columns=labels)
     val = 1
     for i in range(1, dist_matrix.shape[0]):
         for j in range(0, i):
             dist_matrix.iat[i, j] = val
+            dist_matrix.iat[j, i] = val
             val = val + 1
 
     print "distance matrix:"
     print dist_matrix
-    print
-    print "Q matrix:"
-    print _calculate_q_matrix(dist_matrix)
     print
     
     njt = NJTree()
