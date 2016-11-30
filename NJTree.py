@@ -1,14 +1,13 @@
 '''
-Represents a neighbor-joining classification tree. 
+Represents a neighbor-joining classification tree.
 Equation Ref: https://en.wikipedia.org/wiki/Neighbor_joining
 
-Attributes:
-- tree [nested dictionaries?]
+:attribute tree: (dict) Tree of the form {node : {neighbor : weight, ...}, ...}.
+:attribute dist_matrix: (pandas DataFrame) Matrix of pairwise distances.
 
-Methods:
-- build(dist_matrix)
-- classify_treeNN(protein_sequence)
-- classify_treeInsert(protein_sequnce)
+:function build(dist_matrix)
+:function classify_treeNN(protein_sequence)
+:function classify_treeInsert(protein_sequence)
 '''
 
 import decimal
@@ -19,8 +18,7 @@ from pprint import pprint
 DEBUG = True
 
 def _calculate_q_matrix(dist_matrix):
-    # Calculates q_matrix matrix from the distance matrix
-    # wiki EQ 1
+    # Calculates q_matrix matrix from the distance matrix (wiki EQ 1)
     n = dist_matrix.shape[0] # Number of sequences
     q_matrix = pd.DataFrame(np.nan,
                             index=dist_matrix.axes[0],
@@ -42,6 +40,7 @@ def _calculate_q_matrix(dist_matrix):
 class NJTree:
 
     def __init__(self):
+        ''' Default constructor, initialize tree and distance matrix. '''
         # Tree is made up of nested dictionaries of the form
         #     {node_1_name : {neighbor_1_name : weight, ...}, ...}
         self.tree = {}
@@ -50,13 +49,16 @@ class NJTree:
 
 
     def cluster_leaves(self, i, j):
-        # inputs: 2 leaves to be clustered
-        # Updates tree by adding a new internal node to the tree between i & j.
+        ''' Update tree by adding a new internal node between i and j.
         
+        :param i: (str) Name of first OTU being clustered.
+        :param j: (str) Name of second OTU being clustered.
+        :return None.
+        '''
         n = self.dist_matrix.shape[0] # Number of sequences
         
         # Calculate distances from leaves to be clustered to the new node.
-        # Dist from i to the new node i-j is...
+        # Dist from i to the new node i-j (wiki equation 2) is...
         # .5*dist(i,j) + 1/(2n-4) * (sum(dist(i, )-sum(dist(j, ))
         dist_to_i = (.5 * self.dist_matrix.at[i, j]
                     + (1.0 / (2 * n - 4))
@@ -75,12 +77,13 @@ class NJTree:
 
 
     def update_distances(self, i, j):
-        # updates the dist_matrix by replacing i & j with a new node &
-        #     recalculating distances b/t new node + other OTUs & vise-versa.
-        #     Also add relevant distances to the tree.
-        #         wiki EQ 2 = Distance from each OTU to new node
-        #         wiki EQ 3 = Distance from OTUs to new node
+        ''' Update distance matrix by recalculating distances to/from new node.
         
+        :param i: (str) Name of first OTU that was clustered.
+        :param j: (str) Name of second OTU that was clustered.
+        :return None.
+        '''
+        # Initialize new distance matrix.
         node_label = pd.Index(['('  + j + '-' + i + ')'])
         new_labels = self.dist_matrix.axes[0].drop([i, j]).append(node_label)
         new_dist_matrix = pd.DataFrame(np.nan, index=new_labels, columns=new_labels)
@@ -92,7 +95,7 @@ class NJTree:
                 new_dist_matrix.at[row, col] = self.dist_matrix.at[row, col]
                 new_dist_matrix.at[col, row] = self.dist_matrix.at[row, col]
                 
-        # Distance from other OTU, k, to new node, i-j:
+        # Distance from other OTU, k, to new node, i-j (wiki EQ 3):
         # d(i-j, k) = .5 * (dist(i, k) + dist(j, k) - dist(i, j))
         for k in new_dist_matrix.axes[1].drop(node_label):
             dist = .5 * (self.dist_matrix.at[k, i]
@@ -100,11 +103,17 @@ class NJTree:
                          - self.dist_matrix.at[i, j])
             new_dist_matrix.at[node_label, k] = dist
             new_dist_matrix.at[k, node_label] = dist
+        
+        # Update the distance matrix.
         self.dist_matrix = new_dist_matrix
 
 
     def build(self, dist_matrix):
-
+        ''' Build a classification tree via the neighbor-joining method.
+        
+        :param dist_matrix (pandas.DataFrame): Matrix of pairwise distances.
+        :return None.
+        '''
         n = dist_matrix.shape[0] # Number of sequences
         self.dist_matrix = dist_matrix
 
