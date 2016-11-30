@@ -16,6 +16,8 @@ import numpy as np
 import pandas as pd
 from pprint import pprint
 
+DEBUG = True
+
 def _calculate_q_matrix(dist_matrix):
     # Calculates q_matrix matrix from the distance matrix
     # wiki EQ 1
@@ -40,39 +42,36 @@ def _calculate_q_matrix(dist_matrix):
 class NJTree:
 
     def __init__(self):
-        # TODO: decide on data structure
-        self.dist_matrix = [] # Pandas DS? -- DataFrame?
-        # nested dictionaries? - must include lengths
-        # of the form {node1# : {neighbor1# : weight, ...}, ...} ?
+        # Tree is made up of nested dictionaries of the form
+        #     {node_1_name : {neighbor_1_name : weight, ...}, ...}
         self.tree = {}
+        # Distance matrix is a pandas DataFrame b/c it is a labeled
+        self.dist_matrix = pd.DataFrame()
 
 
     def cluster_leaves(self, i, j):
         # inputs: 2 leaves to be clustered
         # Updates tree by adding a new internal node to the tree between i & j.
         
-        n = dist_matrix.shape[0] # Number of sequences
+        n = self.dist_matrix.shape[0] # Number of sequences
         
         # Calculate distances from leaves to be clustered to the new node.
         # Dist from i to the new node i-j is...
         # .5*dist(i,j) + 1/(2n-4) * (sum(dist(i, )-sum(dist(j, ))
-        dist_to_i = (.5 * self.dist_matrix.at[i, j] +
-                    ((1 / (2 * n - 4)) *
-                        (np.nansum(self.dist_matrix.loc[i, :]) -
-                        np.nansum(self.dist_matrix.loc[:, j]))))
+        dist_to_i = (.5 * self.dist_matrix.at[i, j]
+                    + (1.0 / (2 * n - 4))
+                    * (np.nansum(self.dist_matrix.loc[i, :])
+                        - np.nansum(self.dist_matrix.loc[:, j])))
         # Dist from j to new node is dist(i,j) - dist(i, i-j)
         dist_to_j = self.dist_matrix.at[i, j] - dist_to_i
         
         # Add new node to tree.
-        node_name = "(" + j + "-" + i + ")"
+        node_name = '(' + j + '-' + i + ')'
         self.tree[node_name] = {i : dist_to_i, j : dist_to_j}
         if self.tree.has_key(i):
             self.tree[i][node_name] = dist_to_i
         if self.tree.has_key(j):
             self.tree[j][node_name] = dist_to_j
-        print "Tree:"
-        pprint(self.tree)
-        print
 
 
     def update_distances(self, i, j):
@@ -82,7 +81,7 @@ class NJTree:
         #         wiki EQ 2 = Distance from each OTU to new node
         #         wiki EQ 3 = Distance from OTUs to new node
         
-        node_label = pd.Index(["("  + j + "-" + i + ")"])
+        node_label = pd.Index(['('  + j + '-' + i + ')'])
         new_labels = self.dist_matrix.axes[0].drop([i, j]).append(node_label)
         new_dist_matrix = pd.DataFrame(np.nan, index=new_labels, columns=new_labels)
         
@@ -101,9 +100,6 @@ class NJTree:
                          - self.dist_matrix.at[i, j])
             new_dist_matrix.at[node_label, k] = dist
             new_dist_matrix.at[k, node_label] = dist
-        print "New distance matrix:"
-        pprint(new_dist_matrix)
-        print
         self.dist_matrix = new_dist_matrix
 
 
@@ -113,12 +109,18 @@ class NJTree:
         self.dist_matrix = dist_matrix
 
         for i in range(n - 3):
+            if DEBUG:
+                print 'Distance Matrix'
+                pprint(self.dist_matrix)
+                print
 
             # 1] Calculate q_matrix matrix from distances
             q_matrix = _calculate_q_matrix(self.dist_matrix)
-            print "Q matrix:"
-            pprint(q_matrix)
-            print
+            
+            if DEBUG:
+                print 'Q matrix:'
+                pprint(q_matrix)
+                print
 
             # 2] Find a pair (i,j) where q_matrix(i,j) has the lowest value
             min = decimal.Decimal('Infinity')
@@ -135,6 +137,10 @@ class NJTree:
 
             # 3] Cluster (j, i) pair by adding new node to tree
             self.cluster_leaves(min_row, min_col)
+            if DEBUG:
+                print 'Tree:'
+                pprint(self.tree)
+                print '\n\n'
 
             # 4] Recalculate distances (distance matrix)
             self.update_distances(min_row, min_col)
@@ -146,18 +152,17 @@ class NJTree:
         second_branch = self.dist_matrix.iat[0, 1] - first_branch
         third_branch = self.dist_matrix.iat[1, 2] - second_branch
         
-        self.tree["X"] = {self.dist_matrix.axes[0][0] : first_branch,
+        self.tree['X'] = {self.dist_matrix.axes[0][0] : first_branch,
                         self.dist_matrix.axes[0][1] : second_branch,
                         self.dist_matrix.axes[0][2] : third_branch}
         for otu in self.dist_matrix.axes[0]:
             if self.tree.has_key(otu):
-                self.tree[otu]["X"] = self.tree["X"][otu]
+                self.tree[otu]['X'] = self.tree['X'][otu]
         
-        print "Tree:"
-        pprint(self.tree)
-        print
+        if DEBUG:
+            print 'Final tree:'
+            pprint(self.tree)
             
-
 
     def classify_treeNN(self, protein_sequence):
         return
@@ -168,20 +173,16 @@ class NJTree:
 
 
 if __name__ == '__main__':
-    # Create a distance matrix for testing.
-    labels = ["1", "2", "3", "4", "5", "6"]
-    dist_matrix = pd.DataFrame(np.nan, index=labels, columns=labels)
-    val = 1
-    for i in range(1, dist_matrix.shape[0]):
-        for j in range(0, i):
-            dist_matrix.iat[i, j] = val
-            dist_matrix.iat[j, i] = val
-            val = val + 1
-
-    print "distance matrix:"
-    pprint(dist_matrix)
-    print
+    # Create a distance matrix for testing, using the example from Wikipedia.
+    labels = ['a', 'b', 'c', 'd', 'e']
+    dist_matrix = pd.DataFrame([[0, 5,  9,  9,  8],
+                                [5, 0,  10, 10, 9],
+                                [9, 10, 0,  8,  7],
+                                [9, 10, 8,  0,  3],
+                                [8, 9,  7,  3,  0]],
+                            index=labels, columns=labels)
     
+    # Build the test tree
     njt = NJTree()
     njt.build(dist_matrix)
 
