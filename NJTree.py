@@ -14,6 +14,7 @@ Methods:
 import decimal
 import numpy as np
 import pandas as pd
+from pprint import pprint
 
 def _calculate_q_matrix(dist_matrix):
     # Calculates q_matrix matrix from the distance matrix
@@ -65,13 +66,16 @@ class NJTree:
         # Add new node to tree.
         node_name = "(" + j + "-" + i + ")"
         self.tree[node_name] = {i : dist_to_i, j : dist_to_j}
+        if self.tree.has_key(i):
+            self.tree[i][node_name] = dist_to_i
+        if self.tree.has_key(j):
+            self.tree[j][node_name] = dist_to_j
         print "Tree:"
-        print self.tree
+        pprint(self.tree)
         print
 
 
     def update_distances(self, i, j):
-        # TODO: write update_distances function
         # updates the dist_matrix by replacing i & j with a new node &
         #     recalculating distances b/t new node + other OTUs & vise-versa.
         #     Also add relevant distances to the tree.
@@ -98,7 +102,7 @@ class NJTree:
             new_dist_matrix.at[node_label, k] = dist
             new_dist_matrix.at[k, node_label] = dist
         print "New distance matrix:"
-        print new_dist_matrix
+        pprint(new_dist_matrix)
         print
         self.dist_matrix = new_dist_matrix
 
@@ -113,7 +117,7 @@ class NJTree:
             # 1] Calculate q_matrix matrix from distances
             q_matrix = _calculate_q_matrix(self.dist_matrix)
             print "Q matrix:"
-            print q_matrix
+            pprint(q_matrix)
             print
 
             # 2] Find a pair (i,j) where q_matrix(i,j) has the lowest value
@@ -135,7 +139,24 @@ class NJTree:
             # 4] Recalculate distances (distance matrix)
             self.update_distances(min_row, min_col)
             
-            # TODO: Add remaining branch lengths/nodes from dist_matrix
+        # Add remaining branch lengths/nodes from dist_matrix
+        first_branch = 0.5 * (self.dist_matrix.iat[0, 1]
+                              + self.dist_matrix.iat[0, 2]
+                              - self.dist_matrix.iat[1, 2])
+        second_branch = self.dist_matrix.iat[0, 1] - first_branch
+        third_branch = self.dist_matrix.iat[1, 2] - second_branch
+        
+        self.tree["X"] = {self.dist_matrix.axes[0][0] : first_branch,
+                        self.dist_matrix.axes[0][1] : second_branch,
+                        self.dist_matrix.axes[0][2] : third_branch}
+        for otu in self.dist_matrix.axes[0]:
+            if self.tree.has_key(otu):
+                self.tree[otu]["X"] = self.tree["X"][otu]
+        
+        print "Tree:"
+        pprint(self.tree)
+        print
+            
 
 
     def classify_treeNN(self, protein_sequence):
@@ -158,7 +179,7 @@ if __name__ == '__main__':
             val = val + 1
 
     print "distance matrix:"
-    print dist_matrix
+    pprint(dist_matrix)
     print
     
     njt = NJTree()
