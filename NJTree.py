@@ -78,21 +78,26 @@ class NJTree:
                 new_node_name = '1'
             else:
                 new_node_name = str(max([int(k) for k in cluster_names]) + 1)
-        self.tree.add_node(new_node_name)
-        self.tree.add_edge(i, new_node_name, length=dist_to_i)
+
+        [i_name, i_class] = [k.strip() for k in i.split("/")]
+        [j_name, j_class] = [k.strip() for k in j.split("/")]
+        self.tree.add_node(new_node_name, c='')
+        self.tree.add_node(i_name, c=i_class)
+        self.tree.add_node(j_name, c=j_class)
+        self.tree.add_edge(i_name, new_node_name, length=dist_to_i)
         #self.tree[i][new_node_name]['distance'] = dist_to_i
-        self.tree.add_edge(j, new_node_name, length=dist_to_j)
+        self.tree.add_edge(j_name, new_node_name, length=dist_to_j)
         #self.tree[j][new_node_name]['distance'] = dist_to_j
 
         # Add new node to cluster_dictionary
         self.cluster_dictionary[new_node_name] = []
-        for node in [i,j]:
+        for node in [i_name,j_name]:
             if node in self.cluster_dictionary:
                 self.cluster_dictionary[new_node_name].extend(self.cluster_dictionary[node]) 
             else:
                 self.cluster_dictionary[new_node_name].append(node)
 
-        return new_node_name
+        return new_node_name + "/"
 
     def update_distances(self, i, j, node_num):
         ''' Update distance matrix by recalculating distances to/from new node.
@@ -157,7 +162,8 @@ class NJTree:
                                   q_matrix.columns[min_row_idx])
 
             # 3] Cluster (j, i) pair by adding new node to tree
-            new_node_name = self.cluster_leaves(min_row, min_col)
+            # min_row/min_col = sequence labels in form 'ID/class'
+            new_node_name = self.cluster_leaves(min_row, min_col) 
             if DEBUG:
                 print 'Tree:'
                 pprint(nx.clustering(self.tree))
@@ -168,12 +174,12 @@ class NJTree:
             self.update_distances(min_row, min_col, new_node_name)
             
         # Add remaining branch lengths/nodes from dist_matrix
-        last_cluster_added = new_node_name
+        last_cluster_name = new_node_name.split("/")[0].strip()
         mid_edge_length = 0.5 * (self.dist_matrix.iat[0, 1]
                               + self.dist_matrix.iat[0, 2]
                               - self.dist_matrix.iat[1, 2])
         self.cluster_leaves(self.dist_matrix.columns[0], self.dist_matrix.columns[1], 'X')
-        self.tree.add_edge(last_cluster_added, 'X', length=mid_edge_length)
+        self.tree.add_edge(last_cluster_name, 'X', length=mid_edge_length)
 
         if DEBUG:
             print 'Final tree:'
@@ -198,7 +204,7 @@ class NJTree:
 
 if __name__ == '__main__':
     # Create a distance matrix for testing, using the example from Wikipedia.
-    labels = ['a', 'b', 'c', 'd', 'e']
+    labels = ['a/class1', 'b/class1', 'c/class2', 'q/query', 'e/class3'] #d is query protein
     dist_matrix = pd.DataFrame([[0, 5,  9,  9,  8],
                                 [5, 0,  10, 10, 9],
                                 [9, 10, 0,  8,  7],
@@ -218,6 +224,9 @@ if __name__ == '__main__':
     print '\nCLUSTER KEY:'
     pprint(njt.cluster_dictionary) 
 
-    nx.draw_networkx(njt.tree, with_labels=True)
+    labels = {i[0]: i[1]['c'] for i in njt.tree.nodes(data=True)}
+    layout = nx.spring_layout(njt.tree)
+    #nx.draw_networkx(njt.tree, pos=layout, with_labels=True) #ID labels
+    nx.draw_networkx(njt.tree, pos=layout, with_labels=True, labels=labels) #class labels
     plt.show()
 
