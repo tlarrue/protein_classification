@@ -17,7 +17,7 @@ from pprint import pprint
 import networkx as nx
 import matplotlib.pyplot as plt
 
-DEBUG = False
+DEBUG = True
 
 def _calculate_q_matrix(dist_matrix):
     # Calculates q_matrix matrix from the distance matrix (wiki EQ 1)
@@ -38,6 +38,11 @@ def _calculate_q_matrix(dist_matrix):
 
     return q_matrix
 
+def _isleaf(tree, node_name):
+    if tree.node[node_name]['c'] != '':
+        return True
+    else:
+        return False
 
 class NJTree:
 
@@ -187,16 +192,63 @@ class NJTree:
             pprint(self.cluster_dictionary)
             
 
-    def classify_treeNN(self, protein_sequence):
+    def classify_treeNN(self, query_name, edge_neighborhood=3):
         '''
         Assigns label to query protein based on an analysis of 
         query's neighborhood within NJ Tree containing itself 
         and members of priori database.
         '''
 
+        #1) Find set of closest neighbors & their class names
+        # ie. leaves with at most edge_neighborhood edges between itself 
+        # and the query node
+        # walk thru neighbors, break when significantly above edge_neighborhood
+        neighborhood = []
+        neighbors = list(self.tree[query_name].keys()) # list of adjacent nodes
         
-        return
+        i = 0
+        while i < len(neighbors):
+            neighbor = neighbors[i]
+            num_edges_between = self.tree.number_of_edges(query_name, neighbor)
 
+            if ((num_edges_between <= edge_neighborhood) and _isleaf(self.tree,neighbor)):
+                neighborhood.append(neighbor)
+
+            if (num_edges_between > (edge_neighborhood + 2)):
+                break
+            else:
+                # add neighbor's neighbors to 'neighbors', 
+                # checking for duplicates
+                for n in list(self.tree[neighbor].keys()):
+                    if (n not in neighbors) and (n != query_name):
+                        neighbors.append(n)
+                i+=1
+
+        
+        #2) Define classes of the neighborhood {class: [ids...]}
+        all_classes = [x for x in list(nx.get_node_attributes(self.tree, 'c').values()) if x not in ['query','']]
+        neighborhood_classes = {c:[] for c in all_classes}
+        if DEBUG: print '\nNEIGHBORHOOD: ', neighborhood
+        for node in neighborhood:
+            neighborhood_classes[self.tree.node[node]['c']].append(node)
+        if DEBUG: print '\nNEIGHBORHOOD CLASSES: ', neighborhood_classes 
+
+        #3) Find aggregate similarily score for each class
+        # Use minimum operator for distance measure & maximum for similarity measure
+        R = {}
+        for c,ids in neighborhood_classes.iteritems():
+            sim_score = min([nx.shortest_path_length(self.tree, source=query_name, 
+                target=i, weight='length') for i in ids])
+            if DEBUG: print "\tCLASS / SIM_SCORE: ", c, sim_score
+            R[sim_score] = c # distance measure
+
+        min_score = min(R.keys())
+        if DEBUG: print "MIN_SCORE: ", min_score
+
+        return R[min_score] #class of minimum distance score
+
+    def classify_weighted_treeNN(self, query_name):
+        return
 
     def classify_treeInsert(self, protein_sequnce):
         return
@@ -204,7 +256,7 @@ class NJTree:
 
 if __name__ == '__main__':
     # Create a distance matrix for testing, using the example from Wikipedia.
-    labels = ['a/class1', 'b/class1', 'c/class2', 'q/query', 'e/class3'] #d is query protein
+    labels = ['a/class1', 'b/class1', 'c/class2', 'q/query', 'e/class3'] #d is query protein - q
     dist_matrix = pd.DataFrame([[0, 5,  9,  9,  8],
                                 [5, 0,  10, 10, 9],
                                 [9, 10, 0,  8,  7],
@@ -224,9 +276,14 @@ if __name__ == '__main__':
     print '\nCLUSTER KEY:'
     pprint(njt.cluster_dictionary) 
 
+    query_class = njt.classify_treeNN('q')
+    print '\nQUERY CLASS (TreeNN): ', query_class
+
     labels = {i[0]: i[1]['c'] for i in njt.tree.nodes(data=True)}
     layout = nx.spring_layout(njt.tree)
     #nx.draw_networkx(njt.tree, pos=layout, with_labels=True) #ID labels
     nx.draw_networkx(njt.tree, pos=layout, with_labels=True, labels=labels) #class labels
     plt.show()
+
+
 
