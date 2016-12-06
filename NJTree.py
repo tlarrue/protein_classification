@@ -14,8 +14,10 @@ import decimal
 import numpy as np
 import pandas as pd
 from pprint import pprint
+import networkx as nx
+import matplotlib.pyplot as plt
 
-DEBUG = True
+DEBUG = False
 
 def _calculate_q_matrix(dist_matrix):
     # Calculates q_matrix matrix from the distance matrix (wiki EQ 1)
@@ -43,12 +45,15 @@ class NJTree:
         ''' Default constructor, initialize tree and distance matrix. '''
         # Tree is made up of nested dictionaries of the form
         #     {node_1_name : {neighbor_1_name : weight, ...}, ...}
-        self.tree = {}
+        # self.tree = {}
+        self.tree = nx.Graph()
         # Distance matrix is a pandas DataFrame b/c it is a labeled
         self.dist_matrix = pd.DataFrame()
+        #dictionary to map cluster names to which proteins they group
+        self.cluster_dictionary = {}
 
 
-    def cluster_leaves(self, i, j):
+    def cluster_leaves(self, i, j, new_cluster_name=None):
         ''' Update tree by adding a new internal node between i and j.
         
         :param i: (str) Name of first OTU being clustered.
@@ -64,19 +69,38 @@ class NJTree:
                     + (1.0 / (2 * n - 4))
                     * (np.nansum(self.dist_matrix.loc[i, :])
                         - np.nansum(self.dist_matrix.loc[:, j])))
+
         # Dist from j to new node is dist(i,j) - dist(i, i-j)
         dist_to_j = self.dist_matrix.at[i, j] - dist_to_i
         
-        # Add new node to tree.
-        node_name = '(' + j + '-' + i + ')'
-        self.tree[node_name] = {i : dist_to_i, j : dist_to_j}
-        if self.tree.has_key(i):
-            self.tree[i][node_name] = dist_to_i
-        if self.tree.has_key(j):
-            self.tree[j][node_name] = dist_to_j
+        # Add new node to tree & attach distances to edges 
+        # between each leaf and the new node
+        cluster_names = list(self.cluster_dictionary.keys())
+        if new_cluster_name: 
+            new_node_name = new_cluster_name
+        else:
+            if not cluster_names:
+                new_node_name = '1'
+            else:
+                new_node_name = str(max([int(k) for k in cluster_names]) + 1)
+        self.tree.add_node(new_node_name)
+        self.tree.add_edge(i, new_node_name, length=dist_to_i)
+        #self.tree[i][new_node_name]['distance'] = dist_to_i
+        self.tree.add_edge(j, new_node_name, length=dist_to_j)
+        #self.tree[j][new_node_name]['distance'] = dist_to_j
+
+        # Add new node to cluster_dictionary
+        self.cluster_dictionary[new_node_name] = []
+        for node in [i,j]:
+            if node in self.cluster_dictionary:
+                self.cluster_dictionary[new_node_name].extend(self.cluster_dictionary[node]) 
+            else:
+                self.cluster_dictionary[new_node_name].append(node)
+
+        return new_node_name
 
 
-    def update_distances(self, i, j):
+    def update_distances(self, i, j, node_num):
         ''' Update distance matrix by recalculating distances to/from new node.
         
         :param i: (str) Name of first OTU that was clustered.
@@ -84,7 +108,7 @@ class NJTree:
         :return None.
         '''
         # Initialize new distance matrix.
-        node_label = pd.Index(['('  + j + '-' + i + ')'])
+        node_label = pd.Index([str(node_num)])
         new_labels = self.dist_matrix.axes[0].drop([i, j]).append(node_label)
         new_dist_matrix = pd.DataFrame(np.nan, index=new_labels, columns=new_labels)
         
@@ -140,36 +164,38 @@ class NJTree:
                                   q_matrix.columns[min_row_idx])
 
             # 3] Cluster (j, i) pair by adding new node to tree
-            self.cluster_leaves(min_row, min_col)
+            new_node_name = self.cluster_leaves(min_row, min_col)
             if DEBUG:
                 print 'Tree:'
-                pprint(self.tree)
+                pprint(nx.clustering(self.tree))
+                pprint(self.cluster_dictionary)
                 print '\n\n'
 
             # 4] Recalculate distances (distance matrix)
-            self.update_distances(min_row, min_col)
+            self.update_distances(min_row, min_col, new_node_name)
             
         # Add remaining branch lengths/nodes from dist_matrix
-        first_branch = 0.5 * (self.dist_matrix.iat[0, 1]
+        last_cluster_added = new_node_name
+        mid_edge_length = 0.5 * (self.dist_matrix.iat[0, 1]
                               + self.dist_matrix.iat[0, 2]
                               - self.dist_matrix.iat[1, 2])
-        second_branch = self.dist_matrix.iat[0, 1] - first_branch
-        third_branch = self.dist_matrix.iat[1, 2] - second_branch
-        
-        self.tree['X'] = {self.dist_matrix.axes[0][0] : first_branch,
-                        self.dist_matrix.axes[0][1] : second_branch,
-                        self.dist_matrix.axes[0][2] : third_branch}
-                        
-        for otu in self.dist_matrix.axes[0]:
-            if self.tree.has_key(otu):
-                self.tree[otu]['X'] = self.tree['X'][otu]
-        
+        self.cluster_leaves(self.dist_matrix.columns[0], self.dist_matrix.columns[1], 'X')
+        self.tree.add_edge(last_cluster_added, 'X', length=mid_edge_length)
+
         if DEBUG:
             print 'Final tree:'
-            pprint(self.tree)
+            pprint(nx.clustering(self.tree))
+            pprint(self.cluster_dictionary)
             
 
     def classify_treeNN(self, protein_sequence):
+        '''
+        Assigns label to query protein based on an analysis of 
+        query's neighborhood within NJ Tree containing itself 
+        and members of priori database.
+        '''
+
+        
         return
 
 
@@ -190,4 +216,15 @@ if __name__ == '__main__':
     # Build the test tree
     njt = NJTree()
     njt.build(dist_matrix)
+
+    # Display results
+    print '\nEDGES:'
+    for edge in njt.tree.edges():
+        print edge, ": ", njt.tree.get_edge_data(*edge)
+
+    print '\nCLUSTER KEY:'
+    pprint(njt.cluster_dictionary) 
+
+    nx.draw_networkx(njt.tree, with_labels=True)
+    plt.show()
 
