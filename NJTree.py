@@ -17,7 +17,7 @@ from pprint import pprint
 import networkx as nx
 import matplotlib.pyplot as plt
 
-DEBUG = True
+DEBUG = False
 
 def _calculate_q_matrix(dist_matrix):
     # Calculates q_matrix matrix from the distance matrix (wiki EQ 1)
@@ -38,13 +38,8 @@ def _calculate_q_matrix(dist_matrix):
 
     return q_matrix
 
-def _isleaf(tree, node_name):
-    if tree.node[node_name]['c'] != '':
-        return True
-    else:
-        return False
-
 class NJTree:
+
 
     def __init__(self):
         ''' Default constructor, initialize tree and distance matrix. '''
@@ -52,6 +47,13 @@ class NJTree:
         self.tree = nx.Graph() #using networkx for easy visualization & analysis
         self.dist_matrix = pd.DataFrame() #using pandas for labeled matrix
         self.cluster_dictionary = {} #dict to map cluster names their group of nodes
+
+    def isLeaf(self, node_name):
+        ''' Determines if given node is a leaf of this tree. '''
+        if self.tree.node[node_name]['c'] != '':
+            return True
+        else:
+            return False
 
     def cluster_leaves(self, i, j, new_cluster_name=None):
         ''' Update tree by adding a new internal node between i and j.
@@ -190,51 +192,69 @@ class NJTree:
             print 'Final tree:'
             pprint(nx.clustering(self.tree))
             pprint(self.cluster_dictionary)
+
+    def getNeighborhoodClasses(self, node_name, max_edges=3):
+        ''' Returns dictionary of classes in neighborhood surrounding given node.
+        Dictionary is keyed by class name and values are a list of node names 
+        within each class '''
+
+        neighborhood = [] #build a list of nodes in the neighborhood of input node
+        
+        # Walk through adjacent nodes 1 level at a time, 
+        # testing if they are in the neighborhood
+        neighbors = list(self.tree[node_name].keys()) #list of nodes adjacent to input node
+        i = 0
+        while i < len(neighbors):
+            neighbor = neighbors[i]
+            num_edges_between = self.tree.number_of_edges(node_name, neighbor)
+
+            #neighborhood conditions:
+            if ((num_edges_between <= max_edges) and self.isLeaf(neighbor)):
+                neighborhood.append(neighbor)
+ 
+            if (num_edges_between > (max_edges + 2)):
+                #break if beyond neighborhood
+                break
+            else:
+                #add next level of adjacent nodes to list of nodes to test
+                neighbors.extend([n for n in list(self.tree[neighbor].keys()) if n not in neighbors+[node_name]])
+                #for n in list(self.tree[neighbor].keys()):
+                #    if (n not in neighbors) and (n != node_name):
+                #        neighbors.append(n)
+                i+=1
+        if DEBUG: print '\nNEIGHBORHOOD: ', neighborhood      
+
+        
+        # Get classes of the neighborhood in form: {class: [nodes...]}
+        neighborhood_classes = {}
+        for node in neighborhood:
+            node_class = self.tree.node[node]['c']
+            if node_class not in neighborhood_classes:
+                neighborhood_classes[node_class] = []
+            neighborhood_classes[node_class].append(node)
+
+        if DEBUG: print '\nNEIGHBORHOOD CLASSES: ', neighborhood_classes 
+
+        return neighborhood_classes
+
+
             
 
-    def classify_treeNN(self, query_name, edge_neighborhood=3):
+    def classify_treeNN(self, query_name, neighborhood_max_edges=3):
         '''
         Assigns label to query protein based on an analysis of 
         query's neighborhood within NJ Tree containing itself 
         and members of priori database.
         '''
 
-        #1) Find set of closest neighbors & their class names
-        # ie. leaves with at most edge_neighborhood edges between itself 
+        # 1) Find set of closest neighbors & their class names
+        # ie. leaves with at most neighborhood_max_edges edges between itself 
         # and the query node
-        # walk thru neighbors, break when significantly above edge_neighborhood
-        neighborhood = []
-        neighbors = list(self.tree[query_name].keys()) # list of adjacent nodes
-        
-        i = 0
-        while i < len(neighbors):
-            neighbor = neighbors[i]
-            num_edges_between = self.tree.number_of_edges(query_name, neighbor)
+        neighborhood_classes = self.getNeighborhoodClasses(query_name, neighborhood_max_edges)
 
-            if ((num_edges_between <= edge_neighborhood) and _isleaf(self.tree,neighbor)):
-                neighborhood.append(neighbor)
-
-            if (num_edges_between > (edge_neighborhood + 2)):
-                break
-            else:
-                # add neighbor's neighbors to 'neighbors', 
-                # checking for duplicates
-                for n in list(self.tree[neighbor].keys()):
-                    if (n not in neighbors) and (n != query_name):
-                        neighbors.append(n)
-                i+=1
-
-        
-        #2) Define classes of the neighborhood {class: [ids...]}
-        all_classes = [x for x in list(nx.get_node_attributes(self.tree, 'c').values()) if x not in ['query','']]
-        neighborhood_classes = {c:[] for c in all_classes}
-        if DEBUG: print '\nNEIGHBORHOOD: ', neighborhood
-        for node in neighborhood:
-            neighborhood_classes[self.tree.node[node]['c']].append(node)
-        if DEBUG: print '\nNEIGHBORHOOD CLASSES: ', neighborhood_classes 
-
-        #3) Find aggregate similarily score for each class
+        # 2) Find aggregate similarity score for each class
         # Use minimum operator for distance measure & maximum for similarity measure
+        # EQ 6.1 in Chapt 6, Busa-Fekete et al
         R = {}
         for c,ids in neighborhood_classes.iteritems():
             sim_score = min([nx.shortest_path_length(self.tree, source=query_name, 
@@ -247,8 +267,31 @@ class NJTree:
 
         return R[min_score] #class of minimum distance score
 
-    def classify_weighted_treeNN(self, query_name):
-        return
+    def classify_weighted_treeNN(self, query_name, neighborhood_max_edges=3):
+        '''Varient of classify_treeNN, that divides the similarity 
+        scores by path length to increase influence of tree structure 
+        on class assignment of query sequence'''
+
+        # 1) Find set of closest neighbors & their class names
+        # ie. leaves with at most neighborhood_max_edges edges between itself 
+        # and the query node
+        neighborhood_classes = self.getNeighborhoodClasses(query_name, neighborhood_max_edges)
+
+        # 2) Find aggregate weighted similarity score for each class
+        # Use minimum operator for distance measure & maximum for similarity measure
+        # EQ 6.3 in Chapt 6, Busa-Fekete et al
+        R = {}
+        for c,ids in neighborhood_classes.iteritems():
+            sim_score = min([(nx.shortest_path_length(self.tree, source=query_name, 
+                target=i, weight='length')/nx.shortest_path_length(self.tree, source=query_name, 
+                target=i)) for i in ids])
+            if DEBUG: print "\tCLASS / SIM_SCORE: ", c, sim_score
+            R[sim_score] = c # distance measure
+
+        min_score = min(R.keys())
+        if DEBUG: print "MIN_SCORE: ", min_score
+
+        return R[min_score] #class of minimum distance score
 
     def classify_treeInsert(self, protein_sequnce):
         return
@@ -278,6 +321,9 @@ if __name__ == '__main__':
 
     query_class = njt.classify_treeNN('q')
     print '\nQUERY CLASS (TreeNN): ', query_class
+
+    query_class = njt.classify_weighted_treeNN('q')
+    print 'QUERY CLASS (Weighted TreeNN): ', query_class
 
     labels = {i[0]: i[1]['c'] for i in njt.tree.nodes(data=True)}
     layout = nx.spring_layout(njt.tree)
