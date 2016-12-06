@@ -43,15 +43,10 @@ class NJTree:
 
     def __init__(self):
         ''' Default constructor, initialize tree and distance matrix. '''
-        # Tree is made up of nested dictionaries of the form
-        #     {node_1_name : {neighbor_1_name : weight, ...}, ...}
-        # self.tree = {}
-        self.tree = nx.Graph()
-        # Distance matrix is a pandas DataFrame b/c it is a labeled
-        self.dist_matrix = pd.DataFrame()
-        #dictionary to map cluster names to which proteins they group
-        self.cluster_dictionary = {}
 
+        self.tree = nx.Graph() #using networkx for easy visualization & analysis
+        self.dist_matrix = pd.DataFrame() #using pandas for labeled matrix
+        self.cluster_dictionary = {} #dict to map cluster names their group of nodes
 
     def cluster_leaves(self, i, j, new_cluster_name=None):
         ''' Update tree by adding a new internal node between i and j.
@@ -99,7 +94,6 @@ class NJTree:
 
         return new_node_name
 
-
     def update_distances(self, i, j, node_num):
         ''' Update distance matrix by recalculating distances to/from new node.
         
@@ -130,7 +124,6 @@ class NJTree:
         
         # Update the distance matrix.
         self.dist_matrix = new_dist_matrix
-
 
     def build(self, dist_matrix):
         ''' Build a classification tree via the neighbor-joining method.
