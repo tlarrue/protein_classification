@@ -132,17 +132,12 @@ class NJTree:
                 print
 
             # 2] Find a pair (i,j) where q_matrix(i,j) has the lowest value
-            min = decimal.Decimal('Infinity')
-            (min_col, min_row) = (None, None)
-            
-            # TODO: Find a cleaner way to exclude last col -- need to exclude it
-            # b/c it is all NaN
-            nan_col = q_matrix.axes[1][q_matrix.axes[1].size - 1]
-            for col in q_matrix.axes[1].drop(nan_col):
-                if q_matrix[col][q_matrix.idxmin()[col]] < min:
-                    min = q_matrix[col][q_matrix.idxmin()[col]]
-                    (min_col, min_row) = (col, q_matrix.idxmin()[col])
-            # (i,j) = q_matrix.idxmin()
+            q = q_matrix.values
+            mins = np.where(q == np.nanmin(q))
+            min_col_idx = mins[0][0]
+            min_row_idx = mins[1][0]
+            (min_col, min_row) = (q_matrix.index[min_col_idx], 
+                                  q_matrix.columns[min_row_idx])
 
             # 3] Cluster (j, i) pair by adding new node to tree
             self.cluster_leaves(min_row, min_col)
@@ -164,6 +159,7 @@ class NJTree:
         self.tree['X'] = {self.dist_matrix.axes[0][0] : first_branch,
                         self.dist_matrix.axes[0][1] : second_branch,
                         self.dist_matrix.axes[0][2] : third_branch}
+                        
         for otu in self.dist_matrix.axes[0]:
             if self.tree.has_key(otu):
                 self.tree[otu]['X'] = self.tree['X'][otu]
