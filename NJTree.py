@@ -82,6 +82,7 @@ def _cluster_leaves(tree, cluster_dict, dist_matrix, i, j, new_cluster_name=None
         else:
             new_node_name = str(max([int(k) for k in cluster_names]) + 1)
 
+    print i,j
     [i_name, i_class] = [k.strip() for k in i.split("/")]
     [j_name, j_class] = [k.strip() for k in j.split("/")]
     tree.add_node(new_node_name, c='')
@@ -410,18 +411,22 @@ def readDistanceCSV(filepath):
     f = open(filepath, 'rb')
     data = np.genfromtxt(f, delimiter=',', names=True, case_sensitive=False, dtype=None) #structured array of strings
     f.close()
-    dist_matrix = pd.DataFrame(data, index=data.dtype.names,columns=labels)
+    dist_matrix = pd.DataFrame(data, index=data.dtype.names,columns=data.dtype.names)
+    print dist_matrix.columns.values.tolist()
+    toto=raw_input()
     return dist_matrix
 
 if __name__ == '__main__':
     # Create a distance matrix for testing, using the example from Wikipedia.
-    labels = ['a/class1', 'b/class1', 'c/class2', 'q/query', 'e/class3'] #d is query protein - q
-    dist_matrix = pd.DataFrame([[0, 5,  9,  9,  8],
-                                [5, 0,  10, 10, 9],
-                                [9, 10, 0,  8,  7],
-                                [9, 10, 8,  0,  3],
-                                [8, 9,  7,  3,  0]],
-                            index=labels, columns=labels)
+    # labels = ['a/class1', 'b/class1', 'c/class2', 'q/query', 'e/class3'] #d is query protein - q
+    # dist_matrix = pd.DataFrame([[0, 5,  9,  9,  8],
+    #                             [5, 0,  10, 10, 9],
+    #                             [9, 10, 0,  8,  7],
+    #                             [9, 10, 8,  0,  3],
+    #                             [8, 9,  7,  3,  0]],
+    #                         index=labels, columns=labels)
+
+    dist_matrix = readDistanceCSV('./distance_matrix.csv')
     
     # Build the test tree
     njt = NJTree()
