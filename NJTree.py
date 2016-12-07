@@ -38,6 +38,105 @@ def _calculate_q_matrix(dist_matrix):
 
     return q_matrix
 
+def _find_min_pair(pandas_matrix):
+    '''Returns column/row header pair of the lowest cell in a pandas matrix'''
+    numpy_matrix = pandas_matrix.values
+    mins = np.where(numpy_matrix == np.nanmin(numpy_matrix))
+    min_col_idx = mins[0][0]
+    min_row_idx = mins[1][0]
+    (min_col, min_row) = (pandas_matrix.index[min_col_idx], 
+                          pandas_matrix.columns[min_row_idx])
+
+    return (min_col, min_row)
+
+def _cluster_leaves(tree, cluster_dict, dist_matrix, i, j, new_cluster_name=None):
+    ''' Update tree by adding a new internal node between i and j.
+    
+    :param tree
+    :param dist_matrix: current state of distance matrix
+    :param i: (str) Name of first OTU being clustered.
+    :param j: (str) Name of second OTU being clustered.
+    :return tree, cluster_dict, dist_matrix, new_node_name.
+    '''
+    n = dist_matrix.shape[0] # Number of sequences
+    
+    # Calculate distances from leaves to be clustered to the new node.
+    # Dist from i to the new node i-j (wiki equation 2) is...
+    # .5*dist(i,j) + 1/(2n-4) * (sum(dist(i, )-sum(dist(j, ))
+    dist_to_i = (.5 * dist_matrix.at[i, j]
+                + (1.0 / (2 * n - 4))
+                * (np.nansum(dist_matrix.loc[i, :])
+                    - np.nansum(dist_matrix.loc[:, j])))
+
+    # Dist from j to new node is dist(i,j) - dist(i, i-j)
+    dist_to_j = dist_matrix.at[i, j] - dist_to_i
+    
+    # Add new node to tree & attach distances to edges 
+    # between each leaf and the new node
+    cluster_names = list(cluster_dict.keys())
+    if new_cluster_name: 
+        new_node_name = new_cluster_name
+    else:
+        if not cluster_names:
+            new_node_name = '1'
+        else:
+            new_node_name = str(max([int(k) for k in cluster_names]) + 1)
+
+    [i_name, i_class] = [k.strip() for k in i.split("/")]
+    [j_name, j_class] = [k.strip() for k in j.split("/")]
+    tree.add_node(new_node_name, c='')
+    tree.add_node(i_name, c=i_class)
+    tree.add_node(j_name, c=j_class)
+    tree.add_edge(i_name, new_node_name, length=dist_to_i)
+    tree.add_edge(j_name, new_node_name, length=dist_to_j)
+
+    # Add new node to cluster_dictionary
+    cluster_dict[new_node_name] = []
+    for node in [i_name,j_name]:
+        if node in cluster_dict:
+            cluster_dict[new_node_name].extend(cluster_dict[node]) 
+        else:
+            cluster_dict[new_node_name].append(node)
+
+    return tree, cluster_dict, dist_matrix, new_node_name + "/"
+
+def _update_distances(dist_matrix, i, j, new_node_name):
+    ''' Update distance matrix by recalculating distances to/from new node.
+    
+    :param i: (str) Name of first OTU that was clustered.
+    :param j: (str) Name of second OTU that was clustered.
+    :return None.
+    '''
+    # Initialize new distance matrix.
+    node_label = pd.Index([str(new_node_name)])
+    new_labels = dist_matrix.axes[0].drop([i, j]).append(node_label)
+    new_dist_matrix = pd.DataFrame(np.nan, index=new_labels, columns=new_labels)
+    
+    # Fill in distance matrix
+    # First copy over values that stay the same
+    for row in new_dist_matrix.axes[0].drop(node_label):
+        for col in new_dist_matrix.axes[1].drop([node_label[0], row]):
+            new_dist_matrix.at[row, col] = dist_matrix.at[row, col]
+            new_dist_matrix.at[col, row] = dist_matrix.at[row, col]
+            
+    # Distance from other OTU, k, to new node, i-j (wiki EQ 3):
+    # d(i-j, k) = .5 * (dist(i, k) + dist(j, k) - dist(i, j))
+    for k in new_dist_matrix.axes[1].drop(node_label):
+        dist = .5 * (dist_matrix.at[k, i]
+                     + dist_matrix.at[k, j]
+                     - dist_matrix.at[i, j])
+        new_dist_matrix.at[node_label, k] = dist
+        new_dist_matrix.at[k, node_label] = dist
+    
+    # Return the distance matrix.
+    return new_dist_matrix
+
+def _isLeaf(tree, node_name):
+    if tree.node[node_name]['c'] != '':
+        return True
+    else:
+        return False
+
 class NJTree:
 
 
@@ -50,92 +149,20 @@ class NJTree:
 
     def isLeaf(self, node_name):
         ''' Determines if given node is a leaf of this tree. '''
-        if self.tree.node[node_name]['c'] != '':
-            return True
-        else:
-            return False
+        return _isLeaf(self.tree, node_name)
 
     def cluster_leaves(self, i, j, new_cluster_name=None):
-        ''' Update tree by adding a new internal node between i and j.
-        
-        :param i: (str) Name of first OTU being clustered.
-        :param j: (str) Name of second OTU being clustered.
-        :return None.
-        '''
-        n = self.dist_matrix.shape[0] # Number of sequences
-        
-        # Calculate distances from leaves to be clustered to the new node.
-        # Dist from i to the new node i-j (wiki equation 2) is...
-        # .5*dist(i,j) + 1/(2n-4) * (sum(dist(i, )-sum(dist(j, ))
-        dist_to_i = (.5 * self.dist_matrix.at[i, j]
-                    + (1.0 / (2 * n - 4))
-                    * (np.nansum(self.dist_matrix.loc[i, :])
-                        - np.nansum(self.dist_matrix.loc[:, j])))
+        ''' Update this tree by adding a new internal node between i and j '''
 
-        # Dist from j to new node is dist(i,j) - dist(i, i-j)
-        dist_to_j = self.dist_matrix.at[i, j] - dist_to_i
-        
-        # Add new node to tree & attach distances to edges 
-        # between each leaf and the new node
-        cluster_names = list(self.cluster_dictionary.keys())
-        if new_cluster_name: 
-            new_node_name = new_cluster_name
-        else:
-            if not cluster_names:
-                new_node_name = '1'
-            else:
-                new_node_name = str(max([int(k) for k in cluster_names]) + 1)
+        self.tree, self.cluster_dictionary, self.dist_matrix, new_node_name = _cluster_leaves(
+            self.tree, self.cluster_dictionary, self.dist_matrix, i, j, new_cluster_name)
 
-        [i_name, i_class] = [k.strip() for k in i.split("/")]
-        [j_name, j_class] = [k.strip() for k in j.split("/")]
-        self.tree.add_node(new_node_name, c='')
-        self.tree.add_node(i_name, c=i_class)
-        self.tree.add_node(j_name, c=j_class)
-        self.tree.add_edge(i_name, new_node_name, length=dist_to_i)
-        #self.tree[i][new_node_name]['distance'] = dist_to_i
-        self.tree.add_edge(j_name, new_node_name, length=dist_to_j)
-        #self.tree[j][new_node_name]['distance'] = dist_to_j
+        return new_node_name
 
-        # Add new node to cluster_dictionary
-        self.cluster_dictionary[new_node_name] = []
-        for node in [i_name,j_name]:
-            if node in self.cluster_dictionary:
-                self.cluster_dictionary[new_node_name].extend(self.cluster_dictionary[node]) 
-            else:
-                self.cluster_dictionary[new_node_name].append(node)
+    def update_distances(self, i, j, new_node_name):
+        ''' Update this distance matrix by recalculating distances to/from new node'''
 
-        return new_node_name + "/"
-
-    def update_distances(self, i, j, node_num):
-        ''' Update distance matrix by recalculating distances to/from new node.
-        
-        :param i: (str) Name of first OTU that was clustered.
-        :param j: (str) Name of second OTU that was clustered.
-        :return None.
-        '''
-        # Initialize new distance matrix.
-        node_label = pd.Index([str(node_num)])
-        new_labels = self.dist_matrix.axes[0].drop([i, j]).append(node_label)
-        new_dist_matrix = pd.DataFrame(np.nan, index=new_labels, columns=new_labels)
-        
-        # Fill in distance matrix
-        # First copy over values that stay the same
-        for row in new_dist_matrix.axes[0].drop(node_label):
-            for col in new_dist_matrix.axes[1].drop([node_label[0], row]):
-                new_dist_matrix.at[row, col] = self.dist_matrix.at[row, col]
-                new_dist_matrix.at[col, row] = self.dist_matrix.at[row, col]
-                
-        # Distance from other OTU, k, to new node, i-j (wiki EQ 3):
-        # d(i-j, k) = .5 * (dist(i, k) + dist(j, k) - dist(i, j))
-        for k in new_dist_matrix.axes[1].drop(node_label):
-            dist = .5 * (self.dist_matrix.at[k, i]
-                         + self.dist_matrix.at[k, j]
-                         - self.dist_matrix.at[i, j])
-            new_dist_matrix.at[node_label, k] = dist
-            new_dist_matrix.at[k, node_label] = dist
-        
-        # Update the distance matrix.
-        self.dist_matrix = new_dist_matrix
+        self.dist_matrix = _update_distances(self.dist_matrix, i, j, new_node_name)
 
     def build(self, dist_matrix):
         ''' Build a classification tree via the neighbor-joining method.
@@ -161,12 +188,7 @@ class NJTree:
                 print
 
             # 2] Find a pair (i,j) where q_matrix(i,j) has the lowest value
-            q = q_matrix.values
-            mins = np.where(q == np.nanmin(q))
-            min_col_idx = mins[0][0]
-            min_row_idx = mins[1][0]
-            (min_col, min_row) = (q_matrix.index[min_col_idx], 
-                                  q_matrix.columns[min_row_idx])
+            (min_col, min_row) = _find_min_pair(q_matrix)
 
             # 3] Cluster (j, i) pair by adding new node to tree
             # min_row/min_col = sequence labels in form 'ID/class'
@@ -218,13 +240,10 @@ class NJTree:
             else:
                 #add next level of adjacent nodes to list of nodes to test
                 neighbors.extend([n for n in list(self.tree[neighbor].keys()) if n not in neighbors+[node_name]])
-                #for n in list(self.tree[neighbor].keys()):
-                #    if (n not in neighbors) and (n != node_name):
-                #        neighbors.append(n)
                 i+=1
+
         if DEBUG: print '\nNEIGHBORHOOD: ', neighborhood      
 
-        
         # Get classes of the neighborhood in form: {class: [nodes...]}
         neighborhood_classes = {}
         for node in neighborhood:
@@ -236,9 +255,6 @@ class NJTree:
         if DEBUG: print '\nNEIGHBORHOOD CLASSES: ', neighborhood_classes 
 
         return neighborhood_classes
-
-
-            
 
     def classify_treeNN(self, query_name, neighborhood_max_edges=3):
         '''
@@ -293,9 +309,109 @@ class NJTree:
 
         return R[min_score] #class of minimum distance score
 
-    def classify_treeInsert(self, protein_sequnce):
-        return
+    def classify_treeInsert(self, full_dist_matrix, classes, query):
+        '''
+        :param dist_matrix - a pandas Ds, excluding query 
+        :param classes - a list of candidate class names for query 
+        :query_name - a string representing the query ID
+        '''
 
+        orig_dist_matrix = full_dist_matrix 
+
+        full_dist_matrix = full_dist_matrix.drop(query)
+        full_dist_matrix = full_dist_matrix.drop(query, axis=1)
+        query_name = query.split("/")[0].strip()
+
+        #1] Build a tree for each class
+        class_trees = {}
+        all_columns = full_dist_matrix.columns.values.tolist()
+
+        for c in classes:
+
+            #1a. Construct a mini distance matrix for the current class
+            nonclass_members = [i for i in all_columns if (c not in i)]
+            class_dist_matrix = full_dist_matrix.drop(nonclass_members)
+            class_dist_matrix = class_dist_matrix.drop(nonclass_members, axis=1)
+
+            #1b] Loop through n-3 distance matrix elements & add nodes in tree
+            class_tree = nx.Graph()
+            class_cluster_dict = {}
+            n = class_dist_matrix.shape[0] #number of members in class
+            
+            for i in range(n - 3):
+
+                # i] Calculate q_matrix matrix from distances
+                class_q_matrix = _calculate_q_matrix(class_dist_matrix)
+
+                # ii] Find a pair (i,j) where q_matrix(i,j) has the lowest value
+                (min_col, min_row) = _find_min_pair(class_q_matrix)
+
+                # iii] Cluster (j, i) pair by adding new node to tree
+                # min_row & min_col = sequence labels in form 'ID/class'
+                class_tree, class_cluster_dict, class_dist_matrix, new_node_name = _cluster_leaves(
+                    class_tree, class_cluster_dict, class_dist_matrix, min_row, min_col)
+
+                # iv] Recalculate distances in distance matrix
+                class_dist_matrix = _update_distances(class_dist_matrix, min_row, 
+                    min_col, new_node_name)
+                
+
+            # 1c] Add remaining branch lengths/nodes from distance matrix
+            if (n > 3):
+                last_cluster_name = new_node_name.split("/")[0].strip()
+                mid_edge_length = 0.5 * (class_dist_matrix.iat[0, 1]
+                                      + class_dist_matrix.iat[0, 2]
+                                      - class_dist_matrix.iat[1, 2])
+            else:
+                last_cluster_name = class_dist_matrix.columns.values.tolist()[0]
+                mid_edge_length = 0.5 * class_dist_matrix.iat[0, 1]
+                
+            class_tree, class_cluster_dict, class_dist_matrix, new_node_name = _cluster_leaves(
+                class_tree, class_cluster_dict, class_dist_matrix, class_dist_matrix.columns[0], 
+                class_dist_matrix.columns[1], 'X')
+            class_tree.add_edge(last_cluster_name, 'X', length=mid_edge_length)
+
+            #1d] Add class tree to dictionary
+            print c
+            print class_tree.nodes(data=True)
+            class_trees[c] = class_tree
+
+        #2] Determine the insertion cost of each tree
+        class_insert_costs = pd.DataFrame(np.zeros(len(classes)), index=classes)
+
+        for c,class_tree in class_trees.iteritems():
+
+            #2a. Find insertion cost of each leaf in the tree
+            print nx.clustering(class_tree)
+            print class_tree.nodes(data=True)
+            toto=raw_input()
+            leaves = [i for i in class_tree.nodes() if _isLeaf(class_tree,i)] #ERROR: One of nodes not splitting into
+            leaf_insert_costs = pd.DataFrame(np.zeros(len(leaves)), index=leaves)
+
+            for leaf_i in leaves:
+
+                optimum_insertion_cost = 100
+
+                other_leaves = 0.
+                for leaf_j in leaves:
+                    other_leaves += orig_dist_matrix[leaf_j, query_name] - nx.shortest_path_length(
+                        class_tree, source=leaf_i, target=query_name, weight='length')
+
+                leaf_insert_costs[leaf_i] = min(other_leaves**2)
+            
+            class_insert_costs[c] = min(leaf_insert_costs)
+
+        #3] Output the class name of tree with minimum insertion cost
+        idx = class_insert_costs.idxmin(axis=1)
+
+        return idx
+
+def readDistanceCSV(filepath):
+    f = open(filepath, 'rb')
+    data = np.genfromtxt(f, delimiter=',', names=True, case_sensitive=False, dtype=None) #structured array of strings
+    f.close()
+    dist_matrix = pd.DataFrame(data, index=data.dtype.names,columns=labels)
+    return dist_matrix
 
 if __name__ == '__main__':
     # Create a distance matrix for testing, using the example from Wikipedia.
@@ -324,6 +440,10 @@ if __name__ == '__main__':
 
     query_class = njt.classify_weighted_treeNN('q')
     print 'QUERY CLASS (Weighted TreeNN): ', query_class
+
+    #classes = ['class1', 'class2', 'class3']
+    #query_class = njt.classify_treeInsert(dist_matrix, classes, 'q/query')
+    #print 'QUERY CLASS (TreeInsert): ', query_class
 
     labels = {i[0]: i[1]['c'] for i in njt.tree.nodes(data=True)}
     layout = nx.spring_layout(njt.tree)
