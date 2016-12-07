@@ -18,6 +18,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 
 DEBUG = False
+DELIMITER = "."
 
 def _calculate_q_matrix(dist_matrix):
     # Calculates q_matrix matrix from the distance matrix (wiki EQ 1)
@@ -82,9 +83,9 @@ def _cluster_leaves(tree, cluster_dict, dist_matrix, i, j, new_cluster_name=None
         else:
             new_node_name = str(max([int(k) for k in cluster_names]) + 1)
 
-    print i,j
-    [i_name, i_class] = [k.strip() for k in i.split("/")]
-    [j_name, j_class] = [k.strip() for k in j.split("/")]
+    #print i,j
+    [i_name, i_class] = [k.strip() for k in i.split(DELIMITER)]
+    [j_name, j_class] = [k.strip() for k in j.split(DELIMITER)]
     tree.add_node(new_node_name, c='')
     tree.add_node(i_name, c=i_class)
     tree.add_node(j_name, c=j_class)
@@ -99,7 +100,7 @@ def _cluster_leaves(tree, cluster_dict, dist_matrix, i, j, new_cluster_name=None
         else:
             cluster_dict[new_node_name].append(node)
 
-    return tree, cluster_dict, dist_matrix, new_node_name + "/"
+    return tree, cluster_dict, dist_matrix, new_node_name + DELIMITER
 
 def _update_distances(dist_matrix, i, j, new_node_name):
     ''' Update distance matrix by recalculating distances to/from new node.
@@ -204,7 +205,7 @@ class NJTree:
             self.update_distances(min_row, min_col, new_node_name)
             
         # Add remaining branch lengths/nodes from dist_matrix
-        last_cluster_name = new_node_name.split("/")[0].strip()
+        last_cluster_name = new_node_name.split(DELIMITER)[0].strip()
         mid_edge_length = 0.5 * (self.dist_matrix.iat[0, 1]
                               + self.dist_matrix.iat[0, 2]
                               - self.dist_matrix.iat[1, 2])
@@ -321,7 +322,7 @@ class NJTree:
 
         full_dist_matrix = full_dist_matrix.drop(query)
         full_dist_matrix = full_dist_matrix.drop(query, axis=1)
-        query_name = query.split("/")[0].strip()
+        query_name = query.split(DELIMITER)[0].strip()
 
         #1] Build a tree for each class
         class_trees = {}
@@ -359,7 +360,7 @@ class NJTree:
 
             # 1c] Add remaining branch lengths/nodes from distance matrix
             if (n > 3):
-                last_cluster_name = new_node_name.split("/")[0].strip()
+                last_cluster_name = new_node_name.split(DELIMITER)[0].strip()
                 mid_edge_length = 0.5 * (class_dist_matrix.iat[0, 1]
                                       + class_dist_matrix.iat[0, 2]
                                       - class_dist_matrix.iat[1, 2])
@@ -410,10 +411,12 @@ class NJTree:
 def readDistanceCSV(filepath):
     f = open(filepath, 'rb')
     data = np.genfromtxt(f, delimiter=',', names=True, case_sensitive=False, dtype=None) #structured array of strings
+    print data.dtype.names 
+    toto=raw_input()
     f.close()
     dist_matrix = pd.DataFrame(data, index=data.dtype.names,columns=data.dtype.names)
     print dist_matrix.columns.values.tolist()
-    toto=raw_input()
+    #toto=raw_input()
     return dist_matrix
 
 if __name__ == '__main__':
