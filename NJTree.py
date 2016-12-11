@@ -1,29 +1,20 @@
 '''
 Represents a neighbor-joining classification tree.
 Equation Ref: https://en.wikipedia.org/wiki/Neighbor_joining
-
-:attribute tree: (dict) Tree of the form {node : {neighbor : weight, ...}, ...}.
-:attribute dist_matrix: (pandas DataFrame) Matrix of pairwise distances.
-
-:function build(dist_matrix)
-:function classify_treeNN(protein_sequence)
-:function classify_treeInsert(protein_sequence)
 '''
-
 import decimal
 import numpy as np
 import pandas as pd
 import cPickle as pickle
 from pprint import pprint
 import networkx as nx
-
 from sets import Set
 import scipy.optimize as optimize
 
 # Debug modes
 DEBUG = False #print statements throughout steps
 VIEW_ALL = False #display graphs throughout steps
-PROGRESS = False
+PROGRESS = False #display progress in tree builds
 
 def _calculate_q_matrix(dist_matrix):
     # Calculates q_matrix matrix from the distance matrix (wiki EQ 1)
@@ -43,7 +34,6 @@ def _calculate_q_matrix(dist_matrix):
             q_matrix.iat[j, i] = val
 
     return q_matrix
-
 
 def _find_min_pair(pandas_matrix):
     '''Returns column/row header pair of the lowest cell in a pandas matrix'''
@@ -106,7 +96,6 @@ def _cluster_leaves(tree, cluster_map, dist_matrix, node1, node2, class_map, new
 
     return tree, cluster_map
 
-
 def _update_distances(dist_matrix, node1, node2, new_cluster):
     """Updates a distance matrix by recalculating distances to and from a new cluster node.
 
@@ -142,17 +131,6 @@ def _update_distances(dist_matrix, node1, node2, new_cluster):
     # Return the distance matrix.
     return new_dist_matrix
 
-
-
-
-
-def _isLeaf(tree, node_name):
-    if tree.node[node_name]['c'] != '':
-        return True
-    else:
-        return False
-
-
 class NJTree:
 
     """Represents a neighbor-joining classification tree. 
@@ -182,7 +160,10 @@ class NJTree:
         Returns:
             bool: True if node is a leaf, False otherwise.
         """
-        return _isLeaf(self.tree, node_name)
+        if self.tree.node[node_name]['c'] != '':
+            return True
+        else:
+            return False
 
     def cluster_leaves(self, node1, node2, new_cluster):
         """Updates this tree by adding a new internal node between given nodes.
@@ -201,7 +182,6 @@ class NJTree:
 
         self.work_dist_matrix = _update_distances(self.work_dist_matrix, node1, node2, new_cluster)
 
-
     def build(self, dist_matrix, class_map, cluster_naming_function):
         """Builds this classification tree via the neighbor-joining method.
 
@@ -211,7 +191,6 @@ class NJTree:
             cluster_naming_function (function): Function to assign new names to clusters based on 
                 nodes to be clustered and the cluster dictionary in form myFunct(node1, node2, cluster_map).
         """
-
         # Update attributes
         self.orig_dist_matrix = dist_matrix 
         self.class_map = class_map 
@@ -282,7 +261,6 @@ class NJTree:
             pprint(nx.clustering(self.tree))
             pprint(self.cluster_dictionary)
 
-
     def getNeighborhoodClasses(self, node_name, max_edges=3):
         ''' Returns dictionary of classes in neighborhood surrounding given node.
         Dictionary is keyed by class name and values are a list of node names 
@@ -324,7 +302,6 @@ class NJTree:
 
         return neighborhood_classes
 
-
     def classify_treeNN(self, query_name, neighborhood_max_edges=3):
         '''
         Assigns label to query protein based on an analysis of 
@@ -352,7 +329,6 @@ class NJTree:
 
         return R[min_score] #class of minimum distance score
 
-
     def classify_weighted_treeNN(self, query_name, neighborhood_max_edges=3):
         '''Varient of classify_treeNN, that divides the similarity 
         scores by path length to increase influence of tree structure 
@@ -378,7 +354,6 @@ class NJTree:
         if DEBUG: print "MIN_SCORE: ", min_score
 
         return R[min_score] #class of minimum distance score
-
 
     def classify_treeInsert(self, query_name, cluster_naming_function):
         '''
@@ -449,10 +424,7 @@ class NJTree:
                 return c
                 break
 
-
 def _leaf_insertion_cost(x_y_z_array, dist_matrix, leaf_i, leaves, query_name, orig_njt):
-
-    #dist_matrix, leaf_i, query_name = args
     x,y,z = x_y_z_array
 
     all_leaves_sum = 0.
@@ -490,7 +462,6 @@ def myClusterNaming(node1, node2, cluster_map):
         new_node_name = str(max([int(k) for k in cluster_names]) + 1)
 
     return new_node_name
-
 
 def perform_test(test_set):
     '''
