@@ -555,17 +555,27 @@ def perform_test(test_set):
         labels = {i[0]: i[1]['c'] for i in njt.tree.nodes(data=True)}
         layout = nx.spring_layout(njt.tree)
         all_node_classes = nx.get_node_attributes(njt.tree, 'c')
-        # get rid of internal nodes
+        # Get rid of internal nodes
         node_classes = {k: v for k,v in all_node_classes.items() if len(v) > 0}
         unique_classes = list(Set(node_classes.values()))
         unique_colors = plt.cm.Set3(np.linspace(0, 1, len(unique_classes)))
         color_map = {unique_classes[i] : unique_colors[i] for i in range(len(unique_colors))}
         node_list = node_classes.keys()
         node_colors = [color_map[njt.tree.node[node]['c']] for node in node_list]
+        # Add legend
+        f = plt.figure(1)
+        ax = f.add_subplot(1,1,1)
+        for cls in color_map:
+            ax.plot([0], [0], '-', color=color_map[cls], label=cls, linewidth=10)
+        
         #nx.draw_networkx(njt.tree, pos=layout, with_labels=True) #ID labels
         #nx.draw_networkx(njt.tree, with_labels=True, labels=labels, node_size=100) #class labels
         nx.draw_networkx(njt.tree, with_labels=False, node_size=150,
-                         nodelist=node_list, node_color=node_colors) #no labels
+                         nodelist=node_list, node_color=node_colors, ax=ax) #no labels
+        plt.axis('off')
+        f.set_facecolor('w')
+        plt.legend(loc='upper left')
+        f.tight_layout()
         plt.show()
 
     # Classify 
