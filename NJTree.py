@@ -83,8 +83,9 @@ def _cluster_leaves(tree, cluster_map, dist_matrix, node1, node2, class_map, new
             tree.add_node(node, c='')
         
     tree.add_node(new_cluster, c='')
-    tree.add_edge(node1, new_cluster, length=dist_to_node1)
-    tree.add_edge(node2, new_cluster, length=dist_to_node2)
+    # Viz only scales based on a weight attribute, so we set that as the length 
+    tree.add_edge(node1, new_cluster, length=dist_to_node1, weight=dist_to_node1)
+    tree.add_edge(node2, new_cluster, length=dist_to_node2, weight=dist_to_node2)
 
     # Add new node to cluster map
     cluster_map[new_cluster] = []
@@ -252,8 +253,9 @@ class NJTree:
         new_cluster = cluster_naming_function(node1, node2, self.cluster_map)
         #self.cluster_leaves(self.work_dist_matrix.columns[0], self.work_dist_matrix.columns[1], 'X') 
         self.cluster_leaves(node1, node2, new_cluster)
-        #self.tree.add_edge(previous_cluster, 'X', length=mid_edge_length)
-        self.tree.add_edge(previous_cluster, new_cluster, length=mid_edge_length)
+        # Viz only scales based on a weight attribute, so we set that as the length
+        #self.tree.add_edge(previous_cluster, 'X', length=mid_edge_length, weight=min_edge_length)
+        self.tree.add_edge(previous_cluster, new_cluster, length=mid_edge_length, weight=mid_edge_length)
         #TODO: check these changes make sense, then get rid of comments
 
         if DEBUG:
@@ -504,13 +506,22 @@ def perform_test(test_set):
         njt.build(dist_matrix, class_map, myClusterNaming)
 
     #visualize tree
-    #TODO: work on best viz, color nodes by class name
     if test_set['viz']:
 
         labels = {i[0]: i[1]['c'] for i in njt.tree.nodes(data=True)}
         layout = nx.spring_layout(njt.tree)
+        all_node_classes = nx.get_node_attributes(njt.tree, 'c')
+        # get rid of internal nodes
+        node_classes = {k: v for k,v in all_node_classes.items() if len(v) > 0}
+        unique_classes = list(Set(node_classes.values()))
+        unique_colors = plt.cm.Set3(np.linspace(0, 1, len(unique_classes)))
+        color_map = {unique_classes[i] : unique_colors[i] for i in range(len(unique_colors))}
+        node_list = node_classes.keys()
+        node_colors = [color_map[njt.tree.node[node]['c']] for node in node_list]
         #nx.draw_networkx(njt.tree, pos=layout, with_labels=True) #ID labels
-        nx.draw_networkx(njt.tree, with_labels=True, labels=labels, node_size=100) #class labels
+        #nx.draw_networkx(njt.tree, with_labels=True, labels=labels, node_size=100) #class labels
+        nx.draw_networkx(njt.tree, with_labels=False, node_size=150,
+                         nodelist=node_list, node_color=node_colors) #no labels
         plt.show()
 
     query_results = {}
@@ -531,7 +542,7 @@ def perform_test(test_set):
         query_results['TreeInsert'] = query_class
         print '\nQUERY CLASS (TreeInsert): ', query_class
 
-    return NJTree, query_results
+    return njt, query_results
 
 if __name__ == '__main__':
 
