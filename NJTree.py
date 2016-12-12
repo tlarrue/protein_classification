@@ -1,13 +1,14 @@
 '''
 Class for a neighbor-joining classification tree.
 
-Equation Refs: 
+Equation References: 
     https://en.wikipedia.org/wiki/Neighbor_joining
     Busa-Fekete, et al, 2008, "Tree-based Algorithms for Protein Classification"
 
 Contributors:
     Tara Larrue
     Michael Saugstad
+    Cara Peters
 '''
 import decimal, os, sys
 import numpy as np
