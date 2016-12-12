@@ -18,5 +18,5 @@ A UMD CMSC701 project.
 
 *python NJTree.py ./data/protein_db_njtree.p True all*
 
-The above command will work for any pickled NJTree you save.
+NOTE: The above command will work for any pickled NJTree you save.
 
