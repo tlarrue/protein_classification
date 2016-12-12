@@ -219,7 +219,6 @@ class NJTree:
             node2 (str): node label of node 2.
             new_cluster(str): Name to assign to new internal node. 
         """
-        #TODO: write function to name a new node & update _cluster_leaves
         self.tree, self.cluster_map = _cluster_leaves(self.tree, self.cluster_map, 
             self.work_dist_matrix, node1, node2, self.class_map, new_cluster)
 
