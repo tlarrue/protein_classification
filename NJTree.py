@@ -1,8 +1,15 @@
 '''
-Represents a neighbor-joining classification tree.
-Equation Ref: https://en.wikipedia.org/wiki/Neighbor_joining
+Class for a neighbor-joining classification tree.
+
+Equation Refs: 
+    https://en.wikipedia.org/wiki/Neighbor_joining
+    Busa-Fekete, et al, 2008, "Tree-based Algorithms for Protein Classification"
+
+Contributors:
+    Tara Larrue
+    Michael Saugstad
 '''
-import decimal
+import decimal, os, sys
 import numpy as np
 import pandas as pd
 import cPickle as pickle
@@ -36,7 +43,14 @@ def _calculate_q_matrix(dist_matrix):
     return q_matrix
 
 def _find_min_pair(pandas_matrix):
-    '''Returns column/row header pair of the lowest cell in a pandas matrix'''
+    """Returns column/row header pair of the minimal cell in a pandas matrix.
+
+    Args:
+        pandas_matrix (pandas.DataFrame): a 2-D dataframe
+
+    Returns:
+        tuple: (min_column_name, min_row_name)
+    """
     numpy_matrix = pandas_matrix.values
     mins = np.where(numpy_matrix == np.nanmin(numpy_matrix))
     min_col_idx = mins[0][0]
@@ -131,8 +145,36 @@ def _update_distances(dist_matrix, node1, node2, new_cluster):
     # Return the distance matrix.
     return new_dist_matrix
 
-class NJTree:
+def _leaf_insertion_cost(x_y_z_array, dist_matrix, leaf_i, leaves, query_name, orig_njt):
+    """Objective function to calculate Insertion Cost of a query leaf next to leaf_i.
+    
+    Equations for TreeInsert algorithm in Busa-Fekete, et al, 2008, 
+        "Tree-based Algorithms for Protein Classification".
+    
+    Args:
+        x_y_z_array (array-like): [x,y,z].
+        dist_matrix (pandas.DataFrame): Matrix of pairwise distances for class tree.
+        leaf_i (str): Name of leaf to insert query node next to.
+        leaves (array-like): List of all leaf names in the class tree.
+        query_name (str): Name of query leaf.
+        orig_njt (NJTree): NJTree built with distance matrix of all 
+            elements of candidate classes for query, including the query itself.
 
+    Returns:
+        float: Solution to objective function.
+    """
+    x,y,z = x_y_z_array
+
+    all_leaves_sum = 0.
+    for leaf_j in leaves:
+        if leaf_j == leaf_i:
+            continue
+        else:
+            all_leaves_sum += orig_njt.orig_dist_matrix.at[leaf_j, query_name] - (x + z)
+
+    return all_leaves_sum**2.
+
+class NJTree:
     """Represents a neighbor-joining classification tree. 
 
     Attributes:
@@ -243,52 +285,54 @@ class NJTree:
                 print str(i + 1) + " down, " + str(n-i-4) + " to go..."
             
         # Add remaining branch lengths and nodes from working distance matrix to this tree 
-        #last_cluster_name = new_node_name.split('S')[0].strip()
         previous_cluster = new_cluster_name
         mid_edge_length = 0.5 * (self.work_dist_matrix.iat[0, 1]
                               + self.work_dist_matrix.iat[0, 2]
                               - self.work_dist_matrix.iat[1, 2])
         (node1, node2) = (self.work_dist_matrix.columns[0], self.work_dist_matrix.columns[1])
         new_cluster = cluster_naming_function(node1, node2, self.cluster_map)
-        #self.cluster_leaves(self.work_dist_matrix.columns[0], self.work_dist_matrix.columns[1], 'X') 
         self.cluster_leaves(node1, node2, new_cluster)
-        #self.tree.add_edge(previous_cluster, 'X', length=mid_edge_length)
         self.tree.add_edge(previous_cluster, new_cluster, length=mid_edge_length)
-        #TODO: check these changes make sense, then get rid of comments
 
         if DEBUG:
             print 'Final tree:'
             pprint(nx.clustering(self.tree))
             pprint(self.cluster_dictionary)
 
-    def getNeighborhoodClasses(self, node_name, max_edges=3):
-        ''' Returns dictionary of classes in neighborhood surrounding given node.
-        Dictionary is keyed by class name and values are a list of node names 
-        within each class '''
+    def getNeighborhoodClasses(self, node_name):
+        """Returns a dictionary of classes in the neighborhood surrounding a given node.
 
+        Dictionary is keyed by class name and values are a list of node names 
+        within each class. A neighborhood is the set of nearest leaf neighbors.
+
+        Args:
+            node_name (str): Name of a node of which to get its neighborhood.
+
+        Returns:
+            dict: Map of classes to neighbor nodes within each class.
+        """
         neighborhood = [] #build a list of nodes in the neighborhood of input node
         
         # Walk through adjacent nodes 1 level at a time, 
-        # testing if they are in the neighborhood
         neighbors = list(self.tree[node_name].keys()) #list of nodes adjacent to input node
-        i = 0
-        while i < len(neighbors):
+        
+        #Test if nodes are in the neighborhood
+        max_edges=float('inf')
+        i=0
+        while i< len(neighbors):
             neighbor = neighbors[i]
-            num_edges_between = self.tree.number_of_edges(node_name, neighbor)
+            num_edges_between = nx.shortest_path_length(self.tree, source=node_name, target=neighbor)
 
             #neighborhood conditions:
-            if ((num_edges_between <= max_edges) and self.isLeaf(neighbor)):
-                neighborhood.append(neighbor)
- 
-            if (num_edges_between > (max_edges + 2)):
-                #break if beyond neighborhood
+            if num_edges_between > max_edges:
                 break
             else:
-                #add next level of adjacent nodes to list of nodes to test
-                neighbors.extend([n for n in list(self.tree[neighbor].keys()) if n not in neighbors+[node_name]])
-                i+=1
+                if self.isLeaf(neighbor):
+                    neighborhood.append(neighbor)
+                    max_edges=num_edges_between
 
-        if DEBUG: print '\nNEIGHBORHOOD: ', neighborhood      
+            neighbors.extend([n for n in list(self.tree[neighbor].keys()) if n not in neighbors+[node_name]])
+            i+=1
 
         # Get classes of the neighborhood in form: {class: [nodes...]}
         neighborhood_classes = {}
@@ -298,21 +342,25 @@ class NJTree:
                 neighborhood_classes[node_class] = []
             neighborhood_classes[node_class].append(node)
 
-        if DEBUG: print '\nNEIGHBORHOOD CLASSES: ', neighborhood_classes 
-
         return neighborhood_classes
 
-    def classify_treeNN(self, query_name, neighborhood_max_edges=3):
-        '''
-        Assigns label to query protein based on an analysis of 
-        query's neighborhood within NJ Tree containing itself 
-        and members of priori database.
-        '''
+    def classify_treeNN(self, query_name):
+        """Assigns label to query leaf based on an analysis of query's neighborhood.
 
+        TreeNN algorithm described in Busa-Fekete, et al, 2008, 
+        "Tree-based Algorithms for Protein Classification".
+
+        Args:
+            query_name (str): Name of query node.
+
+        Returns:
+            str: Class name assigned to query node.
+        """
         # 1) Find set of closest neighbors & their class names
         # ie. leaves with at most neighborhood_max_edges edges between itself 
         # and the query node
-        neighborhood_classes = self.getNeighborhoodClasses(query_name, neighborhood_max_edges)
+        neighborhood_classes = self.getNeighborhoodClasses(query_name)
+        print "neighborhood " , neighborhood_classes
 
         # 2) Find aggregate similarity score for each class
         # Use minimum operator for distance measure & maximum for similarity measure
@@ -329,45 +377,27 @@ class NJTree:
 
         return R[min_score] #class of minimum distance score
 
-    def classify_weighted_treeNN(self, query_name, neighborhood_max_edges=3):
-        '''Varient of classify_treeNN, that divides the similarity 
-        scores by path length to increase influence of tree structure 
-        on class assignment of query sequence'''
-
-        # 1) Find set of closest neighbors & their class names
-        # ie. leaves with at most neighborhood_max_edges edges between itself 
-        # and the query node
-        neighborhood_classes = self.getNeighborhoodClasses(query_name, neighborhood_max_edges)
-
-        # 2) Find aggregate weighted similarity score for each class
-        # Use minimum operator for distance measure & maximum for similarity measure
-        # EQ 6.3 in Chapt 6, Busa-Fekete et al
-        R = {}
-        for c,ids in neighborhood_classes.iteritems():
-            sim_score = min([(nx.shortest_path_length(self.tree, source=query_name, 
-                target=i, weight='length')/nx.shortest_path_length(self.tree, source=query_name, 
-                target=i)) for i in ids])
-            if DEBUG: print "\tCLASS / SIM_SCORE: ", c, sim_score
-            R[sim_score] = c # distance measure
-
-        min_score = min(R.keys())
-        if DEBUG: print "MIN_SCORE: ", min_score
-
-        return R[min_score] #class of minimum distance score
-
     def classify_treeInsert(self, query_name, cluster_naming_function):
-        '''
-        :param dist_matrix - a pandas Ds, excluding query 
-        :param classes - a list of candidate class names for query 
-        :query_name - a string representing the query ID
-        '''
+        """Assigns a class to a query leaf based on minimal insertion cost.
+
+        TreeInsert algorithm described in Busa-Fekete, et al, 2008, 
+        "Tree-based Algorithms for Protein Classification".
+
+        Args:
+            query_name (str): Name of query node.
+            cluster_naming_function (function): Function to assign new names 
+                to clusters based on nodes to be clustered and the cluster dictionary in 
+                form myFunct(node1, node2, cluster_map).
+
+        Returns:
+            str: Class name assigned to query node.
+        """
         classes = Set(self.class_map.values())
 
         full_dist_matrix = self.orig_dist_matrix.drop(query_name)
         full_dist_matrix = full_dist_matrix.drop(query_name, axis=1)
 
-        if PROGRESS:
-            print '\nStarting treeInsert!'
+        if PROGRESS: print '\nStarting treeInsert!'
         
         #1] Build a tree for each class
         class_trees = {}
@@ -382,8 +412,7 @@ class NJTree:
             class_dist_matrix = class_dist_matrix.drop(nonclass_members, axis=1)
 
             #1b. Build class tree
-            if PROGRESS:
-                print 'Building class tree for ' + c
+            if PROGRESS: print 'Building class tree for ' + c
 
             class_njt = NJTree()
             class_njt.build(class_dist_matrix, self.class_map, myClusterNaming)
@@ -391,24 +420,25 @@ class NJTree:
             classes_done = classes_done + 1
 
             if PROGRESS:
-                print str(classes_done) + " classes down, " + str(num_of_classes - classes_done) + " to go..."
+                print str(classes_done) + " classes down, " + str(num_of_classes - classes_done) 
+                + " to go..."
 
         #2] Determine the insertion cost of each tree
         class_insert_costs = {}
         for c,class_tree in class_trees.iteritems():
 
             #2a. Find insertion cost of each leaf in the tree
-            leaves = [i for i in class_tree.tree.nodes() if class_tree.isLeaf(i)] #ERROR: One of nodes not splitting into
+            leaves = [i for i in class_tree.tree.nodes() if class_tree.isLeaf(i)] 
             leaf_insert_costs = {}
             for leaf_i in leaves:
 
-                parent_i = class_tree.tree.neighbors(leaf_i)[0] #TODO: Check this is right!
+                parent_i = class_tree.tree.neighbors(leaf_i)[0] 
                 cons = ({'type': 'eq',
                          'fun': lambda x: x[0] + x[1] - nx.shortest_path_length(class_tree.tree, 
                             source=parent_i, target=leaf_i, weight='length')})
-                bnds = [(0,) for x in [0,0,0]]
                 optimum_leaf_insert_cost = optimize.minimize(_leaf_insertion_cost, [0,0,0], 
-                    args=(class_tree.orig_dist_matrix, leaf_i, leaves, query_name, self), method='SLSQP', constraints=cons)
+                    args=(class_tree.orig_dist_matrix, leaf_i, leaves, query_name, self), method='SLSQP', 
+                    constraints=cons)
 
                 if DEBUG:
                     print "Optimum cost for ", leaf_i, " : ", optimum_leaf_insert_cost.x[0]
@@ -424,17 +454,13 @@ class NJTree:
                 return c
                 break
 
-def _leaf_insertion_cost(x_y_z_array, dist_matrix, leaf_i, leaves, query_name, orig_njt):
-    x,y,z = x_y_z_array
 
-    all_leaves_sum = 0.
-    for leaf_j in leaves:
-        if leaf_j == leaf_i:
-            continue
-        else:
-            all_leaves_sum += orig_njt.orig_dist_matrix.at[leaf_j, query_name] - (x + z)
 
-    return all_leaves_sum**2.
+
+'''''''''''''''''''''''''''''''''
+'' TESTING FUNCTIONS
+''
+'''''''''''''''''''''''''''''''''
 
 def read_distance_csv(filepath):
     f = open(filepath, 'rb')
@@ -463,14 +489,25 @@ def myClusterNaming(node1, node2, cluster_map):
 
     return new_node_name
 
+def arrayToCsv(array, outpath):
+    '''saves a structured numpy array with headers as a CSV'''
+    if array.dtype.names:
+        np.savetxt(outpath, array, delimiter=",", header=",".join(i for i in array.dtype.names), comments="", fmt='%s')
+    else:
+        np.savetxt(outpath, array, delimiter=",", fmt='%s')
+    if os.path.exists(outpath):
+        print "\nNew File Saved:", outpath
+
 def perform_test(test_set):
     '''
-    test_set Form: {'tree': name_of_example,
+    test_set form: {'tree': name_of_example OR name_of_pickled_tree,
                     'viz': true or false,
                     'classification': [TreeNN, TreeInsert]}
-    '''
-    #Define a test tree    
+    '''      
     tree_built = False
+    query_results = {}
+
+    # Define a test tree
     if test_set['tree'] == "wiki":
 
         print "\nBuilding Tree with Wikipedia example...\n"
@@ -490,7 +527,7 @@ def perform_test(test_set):
         dist_matrix = read_distance_csv('./data/distance_matrix.csv')
         class_map = read_classes_csv('./data/id_lookup.csv')
         query_name = class_map.keys()[0]
-
+        
     else:
 
         print "\nUsing built tree from file: " + test_set['tree'] + " ...\n"
@@ -498,52 +535,72 @@ def perform_test(test_set):
         query_name = njt.class_map.keys()[0]
         tree_built=True
 
-    #Build the test tree
+    # Build the test tree
     if not tree_built:
         njt = NJTree()
         njt.build(dist_matrix, class_map, myClusterNaming)
 
-    #visualize tree
+    # Record query info 
+    query_results['Protein'] = query_name
+    truth_class = njt.class_map[query_name]
+    query_results['Truth_Class'] = truth_class
+    print "QUERY: ", query_name
+    print "TRUTH: ", truth_class
+
+    # Visualize tree
     #TODO: work on best viz, color nodes by class name
     if test_set['viz']:
-
         labels = {i[0]: i[1]['c'] for i in njt.tree.nodes(data=True)}
         layout = nx.spring_layout(njt.tree)
         #nx.draw_networkx(njt.tree, pos=layout, with_labels=True) #ID labels
         nx.draw_networkx(njt.tree, with_labels=True, labels=labels, node_size=100) #class labels
         plt.show()
 
-    query_results = {}
-
+    # Classify 
     classifications = [i.lower() for i in test_set['classification']]
+
     if "treenn" in classifications:
 
         query_class = njt.classify_treeNN(query_name)
         query_results['TreeNN'] = query_class
+        query_results['TreeNN_Correct'] = (query_class == truth_class)
         print '\nQUERY CLASS (TreeNN): ', query_class
 
-        query_class = njt.classify_weighted_treeNN(query_name)
-        query_results['Weighted_TreeNN'] = query_class
-        print '\nQUERY CLASS (Weighted TreeNN): ', query_class
-
     if "treeinsert" in classifications:
+
         query_class = njt.classify_treeInsert(query_name, myClusterNaming)
         query_results['TreeInsert'] = query_class
+        query_results['TreeInsert_Correct'] = (query_class == truth_class)
         print '\nQUERY CLASS (TreeInsert): ', query_class
 
-    return NJTree, query_results
+    return njt, query_results
+
 
 if __name__ == '__main__':
 
-    import matplotlib.pyplot as plt
+    args = sys.argv
 
-    myTest = {'tree': "./data/protein_db_njtree.p",
-    #myTest = {'tree': "protein_database",
-              'viz': False,
-              'classification': ['TreeNN', 'TreeInsert']}
+    tree = args[1].lower()
+
+    if 'f' in args[2].lower() or '0' in args[2].lower():
+        viz=False
+    else:
+        viz=True
+    if viz:
+        import matplotlib.pyplot as plt
+
+    classify = args[3].lower()
+    if 'all' in classify:
+        classification = ['TreeNN', 'TreeInsert']
+    elif 'nn' in classify:
+        classification = ['TreeNN']
+    else:
+        classification = ['TreeInsert']
+
+    myTest = {'tree': tree,
+              'viz': viz,
+              'classification': classification}
 
     myTree, results = perform_test(myTest)
-
-    #save_file = open("./data/protein_db_njtree.p", "wb")
-    #pickle.dump(myTree, save_file)
-    #save_file.close()
+    print "\nAll Results: "
+    pprint(results)    
